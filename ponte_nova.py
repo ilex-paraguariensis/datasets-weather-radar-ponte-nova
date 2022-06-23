@@ -21,8 +21,6 @@ from typing import (
 )
 
 
-
-
 class CustomDataModule(LightningDataModule):
     def __init__(self, params):
         super().__init__()
@@ -42,8 +40,10 @@ class CustomDataModule(LightningDataModule):
 
         # change data type to float
         self.data = self.data.float()
+
+        # self.data = self.segment_and_threshold_data(self.data, params.data_threshold)
         self.data = self.segment_data(self.data)
-        self.data = self.threshold_data(self.data, 1000)
+        self.data = self.threshold_data(self.data, params.data_threshold)
 
         # normalize data with min-max normalization and scale to -1 to 1
         self.data = (
@@ -60,7 +60,7 @@ class CustomDataModule(LightningDataModule):
         train_size = int(0.8 * len(self.data))
         test_size = len(self.data) - train_size
         self.train_data, self.test_data = random_split(
-            self.data, [train_size, test_size]
+            self.data, [train_size, test_size], t.Generator().manual_seed(42)
         )
 
         # segment data into sequences
@@ -81,6 +81,21 @@ class CustomDataModule(LightningDataModule):
         """
         flat_data = data.view(data.shape[0], -1)
         return data[flat_data.sum(1) > threshold]
+
+    def segment_and_threshold_data(self, data, threshold):
+
+        # iterate over data sequences, only accept sequences of length in_seq_len + out_seq_len where sum of data is greater than threshold
+
+        seq_size = self.in_seq_len + self.out_seq_len
+        data_seq_size = data.shape[0]
+
+        segments = []
+        for i in range(data_seq_size - seq_size):
+            if t.sum(data[i : i + seq_size]) > threshold:
+                segments.append(data[i : i + seq_size])
+                i += seq_size
+
+        return t.stack(segments)
 
     def segment_data(self, data):
         """
@@ -107,7 +122,7 @@ class CustomDataModule(LightningDataModule):
         return DataLoader(
             self.train_data,
             batch_size=self.train_batch_size,
-            shuffle=False,
+            shuffle=True,
             num_workers=self.num_workers,
         )
 
@@ -146,9 +161,6 @@ class CustomDataset(Dataset):
         ].unsqueeze(1)
 
 
-
-
-
 class SubsetWrapper(Subset):
     def __init__(self, super_subset: Subset, in_seq_len, out_seq_len) -> None:
         super().__init__(super_subset.dataset, super_subset.indices)
@@ -165,5 +177,3 @@ class SubsetWrapper(Subset):
         return item[: self.in_seq_len].unsqueeze(1), item[self.in_seq_len :].unsqueeze(
             1
         )
-
-
